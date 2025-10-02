@@ -227,7 +227,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
         note_line = f"\n\n📝 Примечание:\n{escape_markdown_v2(note)}" if note else ""
 
         proof_line = f">Пруфы: [ссылка]({proof_url})" if proof_url else ""
-        chat_line = "Наш чат: @loneasBASE\nНаш канал: @Loneasproofs"
+        chat_line = "Наш чат: @loneasBASE\n>Наш канал: @Loneasproofs"
 
         if proof_url:
             footer = proof_line + "\n>" + chat_line
@@ -671,4 +671,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
