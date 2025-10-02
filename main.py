@@ -46,6 +46,26 @@ def init_db():
             note TEXT
         )
     ''')
+    # Новая таблица для хранения юзеров, которые писали боту
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def save_user_if_needed(update: Update):
+    user = update.effective_user
+    if not user or not user.username:
+        return  # Нет пользователя или нет username — нечего обновлять
+
+    conn = sqlite3.connect('scam_base.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)
+    ''', (user.id, user.username))
     conn.commit()
     conn.close()
 
@@ -145,6 +165,8 @@ def get_social_footer(proof_url: str = None) -> str:
 # === ОСНОВНЫЕ КОМАНДЫ ===
 
 def start(update: Update, context: CallbackContext):
+    # Сохраняем юзера при /start
+    save_user_if_needed(update)
     msg = (
         "🛡️ *Скам\\-база Лонеаса*\n\n"
         "🔍 Отправьте `@username` для проверки\\.\n"
@@ -153,6 +175,8 @@ def start(update: Update, context: CallbackContext):
     update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
 
 def handle_check_command(update: Update, context: CallbackContext):
+    # Сохраняем юзера при проверке
+    save_user_if_needed(update)
     if not context.args:
         update.message.reply_text("❌ Используйте: /check @username или /check ID", parse_mode=ParseMode.MARKDOWN_V2)
         return
@@ -165,6 +189,8 @@ def handle_check_command(update: Update, context: CallbackContext):
     _handle_user_check(update, context, query)
 
 def handle_check_in_pm(update: Update, context: CallbackContext):
+    # Сохраняем юзера при проверке
+    save_user_if_needed(update)
     # Обрабатываем @username в личке
     query = update.message.text.strip()
     if query.startswith('@'):
@@ -227,17 +253,17 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
     else:
         username_clean = clean_query
         user_id = None
-        try:
-            chat = context.bot.get_chat(f"@{username_clean}")
-            if chat.type == 'private':
-                user_id = chat.id
-                username = username_clean
-                display = f"@{escape_markdown_v2(username)} \\| ID: {user_id}"
-            else:
-                username = username_clean
-                display = f"@{escape_markdown_v2(username)} \\| ID: неизвестен"
-        except Exception as e:
-            logger.warning(f"Не удалось получить ID для @{username_clean}: {e}")
+        # Пытаемся получить ID из таблицы users
+        conn = sqlite3.connect('scam_base.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (username_clean.lower(),))
+        result = cursor.fetchone()
+        conn.close()
+        if result:
+            user_id = result[0]
+            username = username_clean
+            display = f"@{escape_markdown_v2(username)} \\| ID: {user_id}"
+        else:
             username = username_clean
             display = f"@{escape_markdown_v2(username)} \\| ID: неизвестен"
 
@@ -491,16 +517,14 @@ def _save_to_db(update: Update, context: CallbackContext, table: str, publish=Fa
         username = None
     else:
         username = target
-        # Пытаемся получить ID по username
-        try:
-            chat = context.bot.get_chat(username)
-            if chat.type == 'private':
-                user_id = chat.id
-            else:
-                user_id = None  # Это канал или группа
-        except Exception as e:
-            logger.warning(f"Не удалось получить ID для @{username}: {e}")
-            user_id = None
+        # Пытаемся получить ID из таблицы users
+        conn = sqlite3.connect('scam_base.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (target.lower(),))
+        result = cursor.fetchone()
+        conn.close()
+        if result:
+            user_id = result[0]
 
     # Удаляем из другой таблицы, если есть
     other_table = 'trusted' if table == 'scammers' else 'scammers'
@@ -556,7 +580,7 @@ def handle_channel_message(update: Update, context: CallbackContext):
         return
 
     command_full = parts[0]  # /addscam или /addtrusted
-    rest = parts[1]  # @lox1234 | лох | https://t.me/durov
+    rest = parts[1]  # @lox1234 | лох | https://t.me/durov  
 
     # Теперь делим по " | "
     data_parts = rest.split(' | ')
@@ -646,8 +670,4 @@ def main():
     updater.idle()
 
 if __name__ == '__main__':
-
     main()
-
-
-
