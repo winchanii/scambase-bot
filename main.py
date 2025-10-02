@@ -156,7 +156,7 @@ def get_user_info_block(username: str, user_id: int, note: str = "") -> str:
 
 def get_social_footer(proof_url: str = None) -> str:
     footer = (
-        "💬 Наш чат: @loneasBASE"
+        "💬 Наш чат: @loneasBASE\n💻Наш канал: @Loneasproofs"
     )
     if proof_url:
         footer += f"\n🔗 Пруфы: [ссылка]({proof_url})"
@@ -210,7 +210,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
         msg = (
             f"👤 Пользователь: {display}\n\n"
             f"{status_line}{note_line}\n\n"
-            f"> Наш чат: @loneasBASE"
+            f"> Наш чат: @loneasBASE\n>Наш канал: @Loneasproofs"
         )
         with open('guarantee.jpg', 'rb') as photo:
             update.message.reply_photo(photo=photo, caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
@@ -227,7 +227,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
         note_line = f"\n\n📝 Примечание:\n{escape_markdown_v2(note)}" if note else ""
 
         proof_line = f">Пруфы: [ссылка]({proof_url})" if proof_url else ""
-        chat_line = "Наш чат: @loneasBASE"
+        chat_line = "Наш чат: @loneasBASE\nНаш канал: @Loneasproofs"
 
         if proof_url:
             footer = proof_line + "\n>" + chat_line
@@ -273,7 +273,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
     msg = (
         f"⚫️ {display}\n\n"
         f"{status_line}\n\n"
-        f"> Наш чат: @loneasBASE"
+        f"> Наш чат: @loneasBASE\n>Наш канал: @Loneasproofs"
     )
     with open('unknown.jpg', 'rb') as photo:
         update.message.reply_photo(photo=photo, caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
@@ -671,3 +671,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
