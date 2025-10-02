@@ -9,8 +9,9 @@
    git clone https://github.com/yourusername/scam-base-bot.git
    cd scam-base-bot
 2. Запустите установщик
+ ```bash
 chmod +x install.sh
 ./install.sh
-
+ ```
 Для винды
 Джаст скачайте этот репозиторий и запустите
