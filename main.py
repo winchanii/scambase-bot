@@ -197,6 +197,33 @@ def handle_check_in_pm(update: Update, context: CallbackContext):
         _handle_user_check(update, context, query)
 
 def _handle_user_check(update: Update, context: CallbackContext, query: str):
+    clean_query = query.lstrip('@')
+    is_id = clean_query.isdigit()
+
+    # === ОПРЕДЕЛЯЕМ user_id и username ===
+    user_id = None
+    username = None
+
+    if is_id:
+        user_id = int(clean_query)
+        # Пытаемся получить username через get_chat
+        try:
+            chat = context.bot.get_chat(user_id)
+            if chat.type == 'private':
+                username = chat.username
+        except Exception as e:
+            logger.warning(f"Не удалось получить username для ID {user_id}: {e}")
+            username = None
+    else:
+        username = clean_query
+        # Пытаемся получить ID из таблицы users
+        conn = sqlite3.connect('scam_base.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (username.lower(),))
+        result = cursor.fetchone()
+        conn.close()
+        if result:
+            user_id = result[0]
     # СНАЧАЛА ПРОВЕРЕННЫЕ
     trust_info = find_user_in_table(query, 'trusted')
     if trust_info:
@@ -671,5 +698,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
