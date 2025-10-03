@@ -225,7 +225,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
         if result:
             user_id = result[0]
     # СНАЧАЛА ПРОВЕРЕННЫЕ
-    trust_info = find_user_in_table(query, 'trusted')
+    trust_info = find_user_in_table(str(user_id) if user_id else username, 'trusted')
     if trust_info:
         user_id, username, note, _ = trust_info
         display = f"@{escape_markdown_v2(username)} \\| ID: {user_id}" if username else f"ID: {user_id}"
@@ -244,7 +244,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
         return
 
     # ПОТОМ СКАМЕРЫ
-    scam_info = find_user_in_table(query, 'scammers')
+    scam_info = find_user_in_table(str(user_id) if user_id else username, 'scammers')
     if scam_info:
         user_id, username, note, proof_url = scam_info
         display = f"@{escape_markdown_v2(username)} \\| ID: {user_id}" if username else f"ID: {user_id}"
@@ -698,6 +698,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
