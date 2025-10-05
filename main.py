@@ -12,12 +12,11 @@ from datetime import datetime, timedelta
 import glob
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
+
 # === ЗАГРУЗКА КОНФИГУРАЦИИ ===
 CONFIG_FILE = 'config.json'
-# Префиксы для файлов запросов и ответов
 UB_REQUEST_PREFIX = "ubreq_"
 UB_RESPONSE_PREFIX = "ubresp_"
-# Папка для файлов обмена (по умолчанию текущая)
 COMMUNICATION_DIR = "."
 def load_settings():
     """Загружает настройки из config.json."""
@@ -39,7 +38,6 @@ def load_settings():
 
 # Загружаем настройки при импорте модуля
 load_settings()
-
 # Состояния
 (
     WAITING_FOR_TARGET, WAITING_FOR_NOTE,
@@ -47,8 +45,10 @@ load_settings()
     WAITING_FOR_TRUSTED_TARGET, WAITING_FOR_TRUSTED_NOTE,
     WAITING_FOR_REMOVE_TARGET
 ) = range(6)
+# Дебаг
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 # === ЭКРАНИРОВАНИЕ ДЛЯ MARKDOWN_V2 ===
 def escape_markdown_v2(text: str) -> str:
     if not text:
@@ -57,6 +57,7 @@ def escape_markdown_v2(text: str) -> str:
     escape_chars = r'_*[]()~`>#+-=|{}.!'
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', str(text))
 
+# Инициализация ДБ
 def init_db():
     conn = sqlite3.connect('scam_base.db')
     cursor = conn.cursor()
@@ -79,14 +80,14 @@ def init_db():
             note TEXT
         )
     ''')
-    # Новая таблица для хранения юзеров, которые писали боту
+# Новая таблица для хранения юзеров, которые писали боту
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT
         )
     ''')
-    # Новая таблица для хранения информации от юзербота
+# Новая таблица для хранения информации от юзербота
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_profiles (
             user_id INTEGER PRIMARY KEY,
@@ -98,7 +99,7 @@ def init_db():
             all_usernames TEXT
         )
     ''')
-    # Новая таблица для подсчёта поисков
+# Новая таблица для подсчёта поисков
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS search_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,7 +110,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-
+# Сохранение пользователя, если необходимо
 def save_user_if_needed(update: Update):
     user = update.effective_user
     if not user or not user.username:
@@ -121,7 +122,7 @@ def save_user_if_needed(update: Update):
     ''', (user.id, user.username))
     conn.commit()
     conn.close()
-
+# Все юзернеймы по айди
 def get_all_usernames_by_user_id(user_id):
     """
     Получает все юзернеймы пользователя по его ID.
@@ -137,7 +138,7 @@ def get_all_usernames_by_user_id(user_id):
         # all_usernames хранится как строка, разделённая запятыми
         return [uname.strip() for uname in row[0].split(',') if uname.strip()]
     return []
-
+# Логи поиска
 def log_search(user_id, query):
     from datetime import datetime
     date = datetime.now().isoformat()
@@ -148,7 +149,7 @@ def log_search(user_id, query):
     ''', (user_id, query, date))
     conn.commit()
     conn.close()
-
+# Сколько раз в базе искали человекчка
 def get_search_count(user_id):
     if not user_id:
         return 0
@@ -158,7 +159,7 @@ def get_search_count(user_id):
     count = cursor.fetchone()[0]
     conn.close()
     return count
-
+# Мейн функция для сохранения чела в базу через юзбота
 def save_user_profile_from_userbot(user_id, profile):
     all_usernames = profile.get('all_usernames', [])
     if isinstance(all_usernames, list):
@@ -185,7 +186,6 @@ def save_user_profile_from_userbot(user_id, profile):
     ))
     conn.commit()
     conn.close()
-
 def get_user_info_via_userbot(query: str) -> dict:
     """
     Отправляет запрос юзерботу через файл и ждёт ответ.
@@ -304,8 +304,7 @@ def get_user_info_via_userbot(query: str) -> dict:
 
     # Этот return теоретически недостижим, но добавим для полноты
     return {"error": "unreachable_code_reached"}
-
-
+# Поиск чела в базе
 def find_user_in_table(target: str, table: str):
     conn = sqlite3.connect('scam_base.db')
     cursor = conn.cursor()
@@ -338,7 +337,7 @@ def find_user_in_table(target: str, table: str):
     result = cursor.fetchone()
     conn.close()
     return result
-
+# Добавление чела в базу
 def add_user_to_table(user_id, username, original_username, note, table, proof_url=None):
     # Убираем @, если есть
     if username:
@@ -360,7 +359,7 @@ def add_user_to_table(user_id, username, original_username, note, table, proof_u
         ''', (user_id, username, original_username, note))
     conn.commit()
     conn.close()
-
+# Удаление из базы
 def remove_user_from_table(target: str, table: str):
     conn = sqlite3.connect('scam_base.db')
     cursor = conn.cursor()
@@ -383,7 +382,7 @@ def move_user_between_tables(target: str, from_table: str, to_table: str):
     remove_user_from_table(target, from_table)
     add_user_to_table(user_id, username, original_username, note, to_table, proof_url)
     return True
-
+# Блок с инфой об юзере
 def get_user_info_block(username: str, user_id: int, note: str = "") -> str:
     """
     Формирует блок с информацией о пользователе.
@@ -403,7 +402,7 @@ def get_user_info_block(username: str, user_id: int, note: str = "") -> str:
     if note:
         msg += f"\n📝 Примечание:\n{escape_markdown_v2(note)}"
     return msg
-
+# Чат + канал
 def get_social_footer(proof_url: str = None) -> str:
     footer = (
         "💬 Наш чат: @loneasBASE"
@@ -422,7 +421,7 @@ def start(update: Update, context: CallbackContext):
         "✅ Бот покажет статус: _скамер_ или _проверенный гарант_\\.\n"
     )
     update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
-
+# /check
 def handle_check_command(update: Update, context: CallbackContext):
     if not context.args:
         update.message.reply_text("❌ Используйте: /check @username или /check ID", parse_mode=ParseMode.MARKDOWN_V2)
@@ -434,7 +433,7 @@ def handle_check_command(update: Update, context: CallbackContext):
     # Логируем поиск
     log_search(None, query)
     _handle_user_check(update, context, query)
-
+# @username in DM
 def handle_check_in_pm(update: Update, context: CallbackContext):
     # Обрабатываем @username в личке
     query = update.message.text.strip()
@@ -442,7 +441,7 @@ def handle_check_in_pm(update: Update, context: CallbackContext):
         log_search(None, query)
         _handle_user_check(update, context, query)
 
-# ... (весь ваш текущий код до _handle_user_check) ...
+# Мейн функция вывода состояния чела в базе
 
 def _handle_user_check(update: Update, context: CallbackContext, query: str):
     clean_query = query.lstrip('@')
@@ -480,7 +479,7 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
                 save_user_profile_from_userbot(user_id, user_info)
 
     # === ЛОГИРУЕМ ПОИСК (всегда с user_id, если есть) ===
-    log_search(user_id, query)  # <<< ВАЖНО: всегда передаём user_id
+    log_search(user_id, query)
     # === Если не получили user_id — не ищем ===
     if not user_id:
         update.message.reply_text("❌ Не удалось получить ID пользователя\\. Попробуйте позже \\(Возможно\\, это канал или чат переходник\\, пришлите юзернейм из этого канала или чата\\, возможно сработает\\)\\.", parse_mode=ParseMode.MARKDOWN_V2)
@@ -649,18 +648,6 @@ def _handle_user_check(update: Update, context: CallbackContext, query: str):
     with open('unknown.jpg', 'rb') as photo:
         update.message.reply_photo(photo=photo, caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
 
-# === КОМАНДА /mm ===
-def mm_command(update: Update, context: CallbackContext):
-    msg = (
-        "✅ *Проверенные гарантии*\n"
-        "Перед оплатой всегда используйте одного из них:\n"
-        "• @guarantee1\n"
-        "• @guarantee2\n"
-        "• @guarantee3\n"
-        "⚠️ Не забывайте проверять их статус через бота!"
-    )
-    update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
-
 # === АВТООБНОВЛЕНИЕ ID ===
 def auto_update_user_id_on_message(update: Update, context: CallbackContext):
     user = update.effective_user
@@ -708,7 +695,6 @@ def publish_to_channel(context: CallbackContext, user_id, username, note, proof_
 
 # === INLINE РЕЖИМ ===
 def inline_query(update: Update, context: CallbackContext):
-    # <<< ДОБАВЬТЕ ЭТУ СТРОКУ В НАЧАЛО >>>
     query = update.inline_query.query
     user_id = update.inline_query.from_user.id
     logger.info(f"ПОЛУЧЕН INLINE ЗАПРОС: '{query}' от user_id: {user_id}")
@@ -722,7 +708,7 @@ def inline_query(update: Update, context: CallbackContext):
     clean_query = query.lstrip('@')
     is_id = clean_query.isdigit()
 
-    # === СНАЧАЛА ПОЛУЧАЕМ user_id (аналогично _handle_user_check) ===
+    # === СНАЧАЛА ПОЛУЧАЕМ user_id ===
     user_id_to_search = None
     username_to_display = None
     first_name = 'неизвестно'
@@ -815,7 +801,6 @@ def inline_query(update: Update, context: CallbackContext):
     trust_info = find_user_in_table(str(user_id_to_search), 'trusted')
     if trust_info:
         t_user_id, t_username, t_original_username, t_note, _ = trust_info
-        # <<< Правильная логика для display_username >>>
         if not is_id and clean_query:
             display_username = clean_query  # тот, по которому искали
         else:
@@ -838,10 +823,10 @@ def inline_query(update: Update, context: CallbackContext):
 
         info_lines = (
             f"\n🔮 Имя: {escape_markdown_v2(first_name)} {escape_markdown_v2(last_name)}\n"
-            f"📓 Юзернеймы: {all_usernames_str}\n" # all_usernames_str уже содержит экранированные юзернеймы
+            f"📓 Юзернеймы: {all_usernames_str}\n\n" # all_usernames_str уже содержит экранированные юзернеймы
             f"🪬 Дата создания: {escape_markdown_v2(date_created)}\n" # <<< Экранируем date_created
         )
-        status_line = "\n💡`Статус`: *__ГАРАНТ__* ✅\n\n🟢*Данный пользователь является гарантом\\! Следующий вывод был основан на его репутации\\.*"
+        status_line = "💡`Статус`: *__ГАРАНТ__* ✅\n\n🟢*Данный пользователь является гарантом\\! Следующий вывод был основан на его репутации\\.*"
         note_line = f"\n\n🔓Дополнительная информация🔑:\n\n{escape_markdown_v2(t_note)}\n" if t_note else ""
         chat_line = ">Наш чат: @loneasBASE\n>Наш канал: @loneasproofs" # <<< Цитаты > теперь в caption
         msg += f"\n{info_lines}\n{status_line}{note_line}\n{chat_line}"
@@ -880,7 +865,6 @@ def inline_query(update: Update, context: CallbackContext):
         # <<< ЛОГИРОВАНИЕ >>>
         logger.info(f"Inline scammer - clean_query: '{clean_query}', s_username: '{s_username}', username_to_display: '{username_to_display}', display_username: '{display_username}', first_name: '{first_name}', last_name: '{last_name}', date_created: '{date_created}'")
 
-        # Формируем сообщение как в _handle_user_check, но с экранированием
         # Формируем строку отображения
         if display_username and s_user_id:
             display = f"@{escape_markdown_v2(display_username)} \\| ID: `{s_user_id}`"
@@ -930,7 +914,6 @@ def inline_query(update: Update, context: CallbackContext):
         return
 
     # === Не найден ===
-    # <<< Правильная логика для display_username >>>
     if not is_id and clean_query:
         display_username = clean_query  # тот, по которому искали
     else:
@@ -983,13 +966,14 @@ def inline_query(update: Update, context: CallbackContext):
 
 
 # === ОСТАЛЬНЫЕ ФУНКЦИИ ===
+# Добавить в скам
 def add_scammer_start(update: Update, context: CallbackContext):
     if update.effective_user.id not in ADMIN_IDS:
         update.message.reply_text("🚫 Только админы могут добавлять скамеров\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return ConversationHandler.END
     update.message.reply_text("👤 Отправьте `@username` или `ID` скамера:")
     return WAITING_FOR_TARGET
-
+# Перемещение из гарант в скам
 def receive_scammer_target(update: Update, context: CallbackContext):
     target = update.message.text.strip().lstrip('@')
     if not target:
@@ -1001,18 +985,16 @@ def receive_scammer_target(update: Update, context: CallbackContext):
     context.user_data['target'] = target
     update.message.reply_text("✏️ Примечание \\(или /skip\\):")
     return WAITING_FOR_NOTE
-
+# Пруфы скамера
 def receive_scammer_note(update: Update, context: CallbackContext):
     note = update.message.text if update.message.text != '/skip' else ""
     context.user_data['note'] = note
     update.message.reply_text("🔗 Отправьте ссылку на пруфы \\(или /skip\\):")
     return WAITING_FOR_PROOF
-
 def skip_scammer_note(update: Update, context: CallbackContext):
     context.user_data['note'] = ""
     update.message.reply_text("🔗 Отправьте ссылку на пруфы \\(или /skip\\):")
     return WAITING_FOR_PROOF
-
 def receive_scammer_proof(update: Update, context: CallbackContext):
     proof_url = update.message.text.strip()
     if proof_url.lower() == '/skip':
@@ -1024,19 +1006,17 @@ def receive_scammer_proof(update: Update, context: CallbackContext):
         return WAITING_FOR_PROOF
     _save_to_db(update, context, 'scammers', publish=True)
     return ConversationHandler.END
-
 def skip_scammer_proof(update: Update, context: CallbackContext):
     context.user_data['proof_url'] = None
     _save_to_db(update, context, 'scammers', publish=True)
     return ConversationHandler.END
-
+# Добавить гаранта
 def add_trusted_start(update: Update, context: CallbackContext):
     if update.effective_user.id not in ADMIN_IDS:
         update.message.reply_text("🚫 Только админы могут добавлять проверенных\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return ConversationHandler.END
     update.message.reply_text("👤 Отправьте `@username` или `ID` проверенного пользователя:")
     return WAITING_FOR_TRUSTED_TARGET
-
 def receive_trusted_target(update: Update, context: CallbackContext):
     target = update.message.text.strip().lstrip('@')
     if not target:
@@ -1048,25 +1028,22 @@ def receive_trusted_target(update: Update, context: CallbackContext):
     context.user_data['target'] = target
     update.message.reply_text("✏️ Информация \\(или /skip\\):")
     return WAITING_FOR_TRUSTED_NOTE
-
 def receive_trusted_note(update: Update, context: CallbackContext):
     note = update.message.text if update.message.text != '/skip' else ""
     context.user_data['note'] = note
     _save_to_db(update, context, 'trusted', publish=True)
     return ConversationHandler.END
-
 def skip_trusted_note(update: Update, context: CallbackContext):
     context.user_data['note'] = ""
     _save_to_db(update, context, 'trusted', publish=True)
     return ConversationHandler.END
-
+# Удаление из базы
 def remove_start(update: Update, context: CallbackContext):
     if update.effective_user.id not in ADMIN_IDS:
         update.message.reply_text("🚫 Только админы могут удалять\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return ConversationHandler.END
     update.message.reply_text("🗑️ Отправьте `@username` или `ID` для удаления:")
     return WAITING_FOR_REMOVE_TARGET
-
 def receive_remove_target(update: Update, context: CallbackContext):
     target = update.message.text.strip()
     deleted_scam = remove_user_from_table(target, 'scammers')
@@ -1081,9 +1058,8 @@ def receive_remove_target(update: Update, context: CallbackContext):
         msg = "❌ Не найден ни в одной базе\\."
     update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     return ConversationHandler.END
-
+# /listscam
 def list_scam(update: Update, context: CallbackContext):
-    # <<< УБРАНО: if update.effective_user.id not in ADMIN_IDS: >>>
     conn = sqlite3.connect('scam_base.db')
     cursor = conn.cursor()
     cursor.execute("SELECT user_id, original_username FROM scammers") # <<< Используем original_username
@@ -1096,7 +1072,7 @@ def list_scam(update: Update, context: CallbackContext):
     escaped_lines = [escape_markdown_v2(line) for line in lines]
     text = "*🔴 Список скамеров:*\n" + "\n".join(escaped_lines)
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
-
+# /listtrusted
 def list_trusted(update: Update, context: CallbackContext):
     conn = sqlite3.connect('scam_base.db')
     cursor = conn.cursor()
@@ -1110,7 +1086,7 @@ def list_trusted(update: Update, context: CallbackContext):
     escaped_lines = [escape_markdown_v2(line) for line in lines]
     text = "*🟢 Проверенные пользователи:*\n" + "\n".join(escaped_lines)
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
-
+# /help
 def help_command(update: Update, context: CallbackContext):
     msg = (
         "ℹ️ *Справка по командам*\n"
@@ -1125,7 +1101,7 @@ def help_command(update: Update, context: CallbackContext):
         "• `/help` — эта справка\n"
     )
     update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
-
+# сохранение в дб
 def _save_to_db(update: Update, context: CallbackContext, table: str, publish=False):
     target = context.user_data['target']
     note = context.user_data.get('note', '')
@@ -1201,17 +1177,8 @@ def cancel(update: Update, context: CallbackContext):
 def error_handler(update: object, context: CallbackContext):
     logger.error("Exception while handling an update:", exc_info=context.error)
 
-# ... (весь ваш текущий код до функции monitor_channel_messages) ...
-
 # === АВТОМАТИЧЕСКОЕ ДОБАВЛЕНИЕ ИЗ КАНАЛА ===
 def monitor_channel_messages(update: Update, context: CallbackContext):
-    """
-    Обработчик для мониторинга сообщений в канале.
-    Ищет сообщения с фото и текстом в формате:
-    (с сообщением отправляется пруф)
-    ❌Пользователь @DAMP1K❌
-    Суть: скам гарант (это в виде цитаты тг)
-    """
     # Определяем, является ли обновление сообщением или постом в канале
     message = update.message or update.channel_post
 
@@ -1247,13 +1214,12 @@ def monitor_channel_messages(update: Update, context: CallbackContext):
             # Добавляем в базу скамеров, используя username как original_username
             add_user_to_table(user_id, username, username, note, 'scammers', proof_url)
             # Больше никаких уведомлений в канал
-
+# Бекапы
 def backup_database():
-    """Создает резервную копию базы данных."""
-    if not CONFIG.get('backup', {}).get('enabled', False):
+    if not CONFIG_FILE.get('backup', {}).get('enabled', False):
         return
 
-    backup_config = CONFIG['backup']
+    backup_config = CONFIG_FILE['backup']
     db_path = 'scam_base.db'
     backup_dir = backup_config['path']
     keep_last_n = backup_config['keep_last_n']
@@ -1288,11 +1254,10 @@ def backup_database():
 
 # === ФУНКЦИИ ДЛЯ СИНХРОНИЗАЦИИ С GITHUB ===
 def sync_with_github():
-    """Синхронизирует код с GitHub-репозиторием."""
-    if not CONFIG.get('github_sync', {}).get('enabled', False):
+    if not CONFIG_FILE.get('github_sync', {}).get('enabled', False):
         return
 
-    github_config = CONFIG['github_sync']
+    github_config = CONFIG_FILE['github_sync']
     repo_url = github_config['repo_url']
     branch = github_config['branch']
 
@@ -1329,14 +1294,14 @@ def setup_scheduler():
     scheduler = BackgroundScheduler()
     
     # Задача бэкапа
-    backup_config = CONFIG.get('backup', {})
+    backup_config = CONFIG_FILE.get('backup', {})
     if backup_config.get('enabled', False):
         interval_hours = backup_config.get('interval_hours', 24)
         scheduler.add_job(backup_database, 'interval', hours=interval_hours, id='backup_job')
         logger.info(f"Планировщик бэкапа настроен: каждые {interval_hours} часов.")
 
     # Задача синхронизации с GitHub
-    github_config = CONFIG.get('github_sync', {})
+    github_config = CONFIG_FILE.get('github_sync', {})
     if github_config.get('enabled', False):
         interval_minutes = github_config.get('interval_minutes', 30)
         scheduler.add_job(sync_with_github, 'interval', minutes=interval_minutes, id='github_sync_job')
@@ -1347,9 +1312,7 @@ def setup_scheduler():
         logger.info("Планировщик задач запущен.")
     else:
         logger.info("Планировщик задач не настроен (все задачи отключены).")
-
-# ... (остальной код main() остается без изменений) ...
-# === ЗАПУСК ===
+# === старт ===
 def main():
     init_db()
     updater = Updater(BOT_TOKEN, use_context=True)
@@ -1391,7 +1354,6 @@ def main():
     ))
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("mm", mm_command))
     dp.add_handler(CommandHandler("listscam", list_scam)) # <<< Теперь доступна всем
     dp.add_handler(CommandHandler("listtrusted", list_trusted))
     dp.add_handler(CommandHandler("check", handle_check_command))
@@ -1410,4 +1372,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
