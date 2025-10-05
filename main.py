@@ -14,7 +14,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import requests
 # === ЗАГРУЗКА КОНФИГУРАЦИИ ===
 CONFIG_FILE = 'config.json'
-
+# Префиксы для файлов запросов и ответов
+UB_REQUEST_PREFIX = "ubreq_"
+UB_RESPONSE_PREFIX = "ubresp_"
+# Папка для файлов обмена (по умолчанию текущая)
+COMMUNICATION_DIR = "."
 def load_settings():
     """Загружает настройки из config.json."""
     if not os.path.exists(CONFIG_FILE):
@@ -35,8 +39,7 @@ def load_settings():
 
 # Загружаем настройки при импорте модуля
 load_settings()
-UB_REQUEST_PREFIX = "ubreq_"
-UB_RESPONSE_PREFIX = "ubresp_"
+
 # Состояния
 (
     WAITING_FOR_TARGET, WAITING_FOR_NOTE,
@@ -195,104 +198,112 @@ def get_user_info_via_userbot(query: str) -> dict:
     request_filename = f"{UB_REQUEST_PREFIX}{request_uuid}.txt"
     response_filename = f"{UB_RESPONSE_PREFIX}{request_uuid}.json"
     
-    logger.info(f"Отправка запроса юзерботу: '{query}' (UUID: {request_uuid})")
+    # Полные пути к файлам
+    full_request_path = os.path.join(COMMUNICATION_DIR, request_filename)
+    full_response_path = os.path.join(COMMUNICATION_DIR, response_filename)
     
-    try:
-        # 1. Создаём файл запроса с данными и именем файла ответа
-        # Формат: query\nresponse_filename
-        with open(request_filename, 'w', encoding='utf-8') as f:
-            f.write(f"{query}\n{response_filename}")
-        logger.debug(f"Файл запроса создан: {request_filename}")
+    logger.info(f"[Main->UB] Отправка запроса: '{query}' (UUID: {request_uuid})")
 
-        # 2. Ждём появления файла ответа с таймаутом
-        timeout = 30  # секунд
-        start_time = time.time()
-        while not os.path.exists(response_filename):
-            if time.time() - start_time > timeout:
-                logger.error(f"Таймаут ожидания ответа от юзербота для UUID {request_uuid}")
-                # Пытаемся удалить файл запроса, если он всё ещё есть
+    max_retries = 3
+    retry_delay = 0.1 # Начальная задержка 100мс
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            # 1. Создаём файл запроса
+            # Формат: query\nresponse_filename (относительное имя файла ответа)
+            with open(full_request_path, 'w', encoding='utf-8') as f:
+                f.write(f"{query}\n{response_filename}")
+            logger.debug(f"[Main->UB] Файл запроса создан: {full_request_path} (попытка {attempt})")
+
+            # 2. Ждём появления файла ответа с таймаутом
+            timeout = 30  # секунд
+            start_time = time.time()
+            while not os.path.exists(full_response_path):
+                if time.time() - start_time > timeout:
+                    logger.error(f"[Main->UB] Таймаут ожидания ответа от юзербота для UUID {request_uuid} (попытка {attempt})")
+                    # Пытаемся удалить файл запроса, если он всё ещё есть
+                    try:
+                        os.remove(full_request_path)
+                        logger.debug(f"[Main->UB] Файл запроса удалён по таймауту: {full_request_path}")
+                    except OSError as oe:
+                        logger.debug(f"[Main->UB] Не удалось удалить файл запроса по таймауту {full_request_path}: {oe}")
+                    if attempt < max_retries:
+                        logger.info(f"[Main->UB] Повторная попытка {attempt + 1}/{max_retries} через {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2 # Экспоненциальная задержка
+                        break # Выходим из while, чтобы перейти к следующей попытке for
+                    else:
+                        return {"error": "timeout"}
+                time.sleep(0.1) # Проверяем каждые 100мс
+            
+            if not os.path.exists(full_response_path):
+                 # Если вышли из while по таймауту и файл так и не появился, продолжаем цикл for
+                 continue
+
+            logger.debug(f"[Main->UB] Файл ответа найден: {full_response_path} (попытка {attempt})")
+
+            # 3. Читаем данные из файла ответа
+            read_max_retries = 3
+            read_retry_delay = 0.1
+            for read_attempt in range(1, read_max_retries + 1):
                 try:
-                    os.remove(request_filename)
-                except OSError:
-                    pass
-                return {"error": "timeout"}
-            time.sleep(0.2) # Проверяем каждые 200мс
-        
-        logger.debug(f"Файл ответа найден: {response_filename}")
-
-        # 3. Читаем данные из файла ответа
-        max_retries = 5
-        retry_delay = 0.1 # 100ms
-        for attempt in range(max_retries):
+                    with open(full_response_path, 'r', encoding='utf-8') as f:
+                        data = f.read()
+                    logger.debug(f"[Main->UB] Данные из файла ответа прочитаны (попытка чтения {read_attempt}/{read_max_retries}).")
+                    break # Успешно прочитано, выходим из цикла чтения
+                except PermissionError as pe:
+                    logger.warning(f"[Main->UB] Попытка {read_attempt}/{read_max_retries}: Ошибка доступа к файлу {full_response_path}: {pe}. Повтор через {read_retry_delay}s...")
+                    if read_attempt < read_max_retries:
+                        time.sleep(read_retry_delay)
+                        read_retry_delay *= 2 # Экспоненциальная задержка
+                    else:
+                        raise # Если все попытки исчерпаны, выбрасываем исключение
+                except Exception as e:
+                    logger.error(f"[Main->UB] Неожиданная ошибка при чтении файла {full_response_path}: {e}")
+                    raise # Для других ошибок сразу выбрасываем
+            
+            # 4. Парсим JSON
             try:
-                with open(response_filename, 'r', encoding='utf-8') as f:
-                    data = f.read()
-                logger.debug(f"Данные из файла ответа прочитаны (попытка {attempt + 1}).")
-                break
-            except PermissionError as pe:
-                logger.warning(f"Попытка {attempt + 1}/{max_retries}: Ошибка доступа к файлу {response_filename}: {pe}. Повтор через {retry_delay}s...")
-                time.sleep(retry_delay)
-                retry_delay *= 2 # Экспоненциальная задержка
-            except Exception as e:
-                logger.error(f"Неожиданная ошибка при чтении файла {response_filename}: {e}")
-                # Пытаемся удалить файлы запроса и ответа
+                result = json.loads(data)
+                logger.info(f"[Main->UB] Ответ от юзербота для UUID {request_uuid} успешно получен и распарсен.")
+            except json.JSONDecodeError as je:
+                logger.error(f"[Main->UB] Ошибка декодирования JSON из ответа юзербота: {je}. Данные: {data[:100]}...")
+                result = {"error": f"json_decode_error: {je}"}
+
+            # 5. Удаляем файлы запроса и ответа
+            try:
+                os.remove(full_request_path)
+                logger.debug(f"[Main->UB] Файл запроса удалён: {full_request_path}")
+            except OSError as oe:
+                logger.warning(f"[Main->UB] Не удалось удалить файл запроса {full_request_path}: {oe}")
+            try:
+                os.remove(full_response_path)
+                logger.debug(f"[Main->UB] Файл ответа удалён: {full_response_path}")
+            except OSError as oe:
+                logger.warning(f"[Main->UB] Не удалось удалить файл ответа {full_response_path}: {oe}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[Main->UB] Ошибка при взаимодействии с юзерботом для запроса '{query}' (попытка {attempt}): {e}", exc_info=True)
+            # Пытаемся удалить файлы в случае ошибки
+            for file_path in [full_request_path, full_response_path]:
                 try:
-                    os.remove(request_filename)
-                except OSError:
+                    os.remove(file_path)
+                    logger.debug(f"[Main->UB] Файл {file_path} удалён из-за ошибки.")
+                except (OSError, UnboundLocalError):
                     pass
-                try:
-                    os.remove(response_filename)
-                except OSError:
-                    pass
-                return {"error": f"read_error: {e}"}
-        else:
-            # Если цикл завершился без break, значит все попытки исчерпаны
-            logger.error(f"Не удалось прочитать файл ответа {response_filename} после {max_retries} попыток.")
-            # Пытаемся удалить файлы запроса и ответа
-            try:
-                os.remove(request_filename)
-            except OSError:
-                pass
-            try:
-                os.remove(response_filename)
-            except OSError:
-                pass
-            return {"error": "read_permission_denied"}
+            
+            if attempt < max_retries:
+                 logger.info(f"[Main->UB] Повторная попытка {attempt + 1}/{max_retries} через {retry_delay}s...")
+                 time.sleep(retry_delay)
+                 retry_delay *= 2 # Экспоненциальная задержка
+            else:
+                 logger.error(f"[Main->UB] Все попытки взаимодействия с юзерботом для '{query}' исчерпаны.")
+                 return {"error": f"critical_error_after_{max_retries}_attempts: {e}"}
 
-        # 4. Парсим JSON
-        try:
-            result = json.loads(data)
-            logger.info(f"Ответ от юзербота для UUID {request_uuid} успешно получен и распарсен.")
-        except json.JSONDecodeError as je:
-            logger.error(f"Ошибка декодирования JSON из ответа юзербота: {je}. Данные: {data[:100]}...")
-            result = {"error": f"json_decode_error: {je}"}
-
-        # 5. Удаляем файлы запроса и ответа
-        try:
-            os.remove(request_filename)
-            logger.debug(f"Файл запроса удалён: {request_filename}")
-        except OSError as oe:
-            logger.warning(f"Не удалось удалить файл запроса {request_filename}: {oe}")
-        try:
-            os.remove(response_filename)
-            logger.debug(f"Файл ответа удалён: {response_filename}")
-        except OSError as oe:
-            logger.warning(f"Не удалось удалить файл ответа {response_filename}: {oe}")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Критическая ошибка при взаимодействии с юзерботом для запроса '{query}': {e}", exc_info=True)
-        # Пытаемся удалить файлы в случае критической ошибки
-        try:
-            os.remove(request_filename)
-        except (OSError, UnboundLocalError):
-            pass
-        try:
-            os.remove(response_filename)
-        except (OSError, UnboundLocalError):
-            pass
-        return {"error": f"critical_error: {e}"}
+    # Этот return теоретически недостижим, но добавим для полноты
+    return {"error": "unreachable_code_reached"}
 
 
 def find_user_in_table(target: str, table: str):
@@ -1399,3 +1410,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
